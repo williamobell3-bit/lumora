@@ -59,6 +59,57 @@ const FONTS_CSS = `
   0%, 100% { box-shadow: 0 0 20px rgba(232, 200, 117, 0.3); }
   50% { box-shadow: 0 0 40px rgba(232, 200, 117, 0.6); }
 }
+@keyframes tile-flip {
+  0% { transform: perspective(400px) rotateY(0deg); }
+  100% { transform: perspective(400px) rotateY(180deg); }
+}
+@keyframes shockwave {
+  0% { transform: scale(0); opacity: 0.8; }
+  100% { transform: scale(8); opacity: 0; }
+}
+@keyframes screen-flash {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes screen-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-6px, 4px); }
+  40% { transform: translate(8px, -3px); }
+  60% { transform: translate(-4px, -6px); }
+  80% { transform: translate(5px, 5px); }
+}
+@keyframes light-beam {
+  0% { transform: scaleY(0); opacity: 0; }
+  20% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 0; }
+}
+@keyframes vortex-spin {
+  from { transform: rotate(0deg) scale(1); opacity: 1; }
+  to { transform: rotate(720deg) scale(0.3); opacity: 0; }
+}
+@keyframes burst {
+  0% { transform: scale(0); opacity: 1; }
+  60% { transform: scale(2.5); opacity: 1; }
+  100% { transform: scale(4); opacity: 0; }
+}
+@keyframes reveal-zoom {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes typewriter {
+  from { width: 0; }
+  to { width: 100%; }
+}
+@keyframes hue-rotate-once {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+@keyframes crack {
+  0%, 100% { opacity: 0; transform: scaleX(0); }
+  10%, 30% { opacity: 1; transform: scaleX(1); }
+  60% { opacity: 0; transform: scaleX(1); }
+}
 
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
@@ -1093,7 +1144,7 @@ export default function Lumora() {
     setToasts(t => [...t, { id, message, type }]);
   };
 
- // Load from storage
+  // Load from storage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -1109,7 +1160,7 @@ export default function Lumora() {
   useEffect(() => {
     if (loading) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(player)); } catch (e) {}
-  }, [player, loading]); 
+  }, [player, loading]);
 
   // Apply state change, automatically checking for new achievements/badges
   const applyChange = (updater) => {
@@ -1216,17 +1267,19 @@ export default function Lumora() {
                 }}
                 onPublish={async (quiz) => {
                   pushToast("Publishing requires a backend — coming soon!", "warn");
-                }}                
-		onUnpublish={async (quizId) => {
+                }}
+                onUnpublish={async (quizId) => {
                   applyChange(p => ({
                     ...p,
                     publishedQuizIds: (p.publishedQuizIds || []).filter(pid => pid !== quizId),
                   }));
                   pushToast("Quiz removed from the library.", "info");
-                }}                onPlayLibrary={async (item) => {
+                }}
+                onPlayLibrary={async (item) => {
                   // Library play requires a backend — disabled in local build
                   return;
-                }}              />
+                }}
+              />
             )}
             {screen === "scriptorium" && editingQuizId && (
               <QuizEditorScreen
@@ -2177,9 +2230,477 @@ function getFamiliarAbilities(f) {
 // WISHING POOL
 // ============================================================================
 
+// ============================================================================
+// WISH REVEAL ANIMATION
+// ============================================================================
+
+// Rarity reveal config: how many fakeouts, sweep speeds, special effects
+const REVEAL_CONFIG = {
+  glimmer:    { fakeouts: [], sweepMs: 600, finalSweepMs: 600, lockEffect: "none",        familiarReveal: "fade",     totalMs: 1400 },
+  shimmer:    { fakeouts: ["glimmer"], sweepMs: 200, finalSweepMs: 700, lockEffect: "sparkle",     familiarReveal: "fade",     totalMs: 2200 },
+  gleam:      { fakeouts: ["glimmer","shimmer"], sweepMs: 180, finalSweepMs: 800, lockEffect: "pulse",       familiarReveal: "fade",     totalMs: 2800 },
+  radiant:    { fakeouts: ["glimmer","shimmer","gleam"], sweepMs: 160, finalSweepMs: 900, lockEffect: "shockwave",   familiarReveal: "open",     totalMs: 3400 },
+  luminous:   { fakeouts: ["glimmer","shimmer","gleam","radiant"], sweepMs: 150, finalSweepMs: 1000, lockEffect: "beams",       familiarReveal: "open",     totalMs: 4000 },
+  celestial:  { fakeouts: ["glimmer","shimmer","gleam","radiant","luminous"], sweepMs: 140, finalSweepMs: 1100, lockEffect: "stars",       familiarReveal: "orbit",    totalMs: 4500 },
+  prismatic:  { fakeouts: ["glimmer","shimmer","gleam","radiant","luminous","celestial"], sweepMs: 130, finalSweepMs: 1200, lockEffect: "rainbow",     familiarReveal: "orbit",    totalMs: 5000 },
+  eclipsed:   { fakeouts: ["glimmer","shimmer","gleam","radiant","luminous","celestial","prismatic"], sweepMs: 120, finalSweepMs: 1400, lockEffect: "crack",       familiarReveal: "vortex",   totalMs: 5800 },
+  primordial: { fakeouts: ["glimmer","shimmer","gleam","radiant","luminous","celestial","prismatic","eclipsed"], sweepMs: 110, finalSweepMs: 1800, lockEffect: "burst",       familiarReveal: "primordial", totalMs: 7000 },
+};
+
+const TILE_ROWS = 8;
+const TILE_COLS = 12;
+const WAVE_COLS = 3; // 8x3 wave-block
+
+function WishReveal({ familiars, onComplete, onSkipAll }) {
+  const [revealIdx, setRevealIdx] = useState(0); // which familiar in queue
+  // Sort by ascending rarity
+  const sorted = [...familiars].sort((a, b) => RARITIES[a.rarity].tier - RARITIES[b.rarity].tier);
+  const current = sorted[revealIdx];
+
+  if (!current) return null;
+
+  const advanceQueue = () => {
+    if (revealIdx + 1 >= sorted.length) {
+      onComplete();
+    } else {
+      setRevealIdx(revealIdx + 1);
+    }
+  };
+
+  return (
+    <SingleRevealStage
+      key={revealIdx}
+      familiar={current}
+      onComplete={advanceQueue}
+      onSkipAll={onSkipAll}
+      progress={`${revealIdx + 1} / ${sorted.length}`}
+    />
+  );
+}
+
+function SingleRevealStage({ familiar, onComplete, onSkipAll, progress }) {
+  const config = REVEAL_CONFIG[familiar.rarity];
+  const finalRarity = familiar.rarity;
+  // Sequence of colors to cycle through: fakeouts then final
+  const sequence = [...config.fakeouts, finalRarity];
+
+  // Phase tracking: which color sweep we're on, and whether we're showing the lock-in / familiar
+  const [phase, setPhase] = useState("sweeping"); // "sweeping" | "locked" | "familiar"
+  const [seqIdx, setSeqIdx] = useState(0);
+  const [showFamiliar, setShowFamiliar] = useState(false);
+  const [tapCount, setTapCount] = useState(0);
+  const tapTimerRef = useRef(null);
+  const skippedRef = useRef(false);
+  const completedRef = useRef(false);
+
+  const currentColor = RARITIES[sequence[seqIdx]].color;
+  const currentGlow = RARITIES[sequence[seqIdx]].glow;
+  const isFinalColor = seqIdx === sequence.length - 1;
+  const sweepDuration = isFinalColor ? config.finalSweepMs : config.sweepMs;
+
+  // Drive the sweep sequence forward
+  useEffect(() => {
+    if (phase !== "sweeping") return;
+    if (skippedRef.current) return;
+    const t = setTimeout(() => {
+      if (seqIdx < sequence.length - 1) {
+        setSeqIdx(seqIdx + 1);
+      } else {
+        // Final color sweep done — go to lock effect
+        setPhase("locked");
+      }
+    }, sweepDuration);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line
+  }, [seqIdx, phase]);
+
+  // Once locked, after the lock effect plays, show the familiar
+  useEffect(() => {
+    if (phase !== "locked") return;
+    const lockMs = lockEffectDuration(config.lockEffect);
+    const t = setTimeout(() => {
+      setShowFamiliar(true);
+      setPhase("familiar");
+    }, lockMs);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line
+  }, [phase]);
+
+  // Once familiar is showing, allow advance after a beat
+  useEffect(() => {
+    if (phase !== "familiar") return;
+    const t = setTimeout(() => {
+      if (!completedRef.current) {
+        completedRef.current = true;
+        onComplete();
+      }
+    }, familiarHoldDuration(familiar.rarity));
+    return () => clearTimeout(t);
+  // eslint-disable-next-line
+  }, [phase]);
+
+  const skipFakeoutsAndFinal = () => {
+    if (skippedRef.current) return;
+    skippedRef.current = true;
+    setSeqIdx(sequence.length - 1);
+    setPhase("locked");
+  };
+
+  const handleTap = () => {
+    setTapCount(c => c + 1);
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => {
+      if (tapCount + 1 >= 2) {
+        // Double tap → skip ALL remaining wishes, jump to results
+        onSkipAll();
+      } else {
+        // Single tap → skip current animation
+        skipFakeoutsAndFinal();
+      }
+      setTapCount(0);
+    }, 280);
+  };
+
+  return (
+    <div
+      onClick={handleTap}
+      className="fixed inset-0 z-50 cursor-pointer overflow-hidden"
+      style={{ background: "#0a0618" }}
+    >
+      {/* The tile grid */}
+      <RevealTileGrid
+        sequence={sequence}
+        currentSeqIdx={seqIdx}
+        sweepMs={sweepDuration}
+        phase={phase}
+      />
+
+      {/* Lock-in effects layer */}
+      {phase === "locked" && (
+        <LockEffect effect={config.lockEffect} color={currentColor} glow={currentGlow} />
+      )}
+
+      {/* Familiar reveal */}
+      {showFamiliar && (
+        <FamiliarRevealLayer familiar={familiar} reveal={config.familiarReveal} />
+      )}
+
+      {/* HUD: progress + skip hint */}
+      <div className="absolute top-4 right-4 flex flex-col items-end gap-1 pointer-events-none">
+        <div className="text-amber-200/60 font-display text-xs tracking-widest">{progress}</div>
+        <div className="text-amber-200/40 font-serif italic text-[10px]">tap to skip · double-tap for all</div>
+      </div>
+    </div>
+  );
+}
+
+function lockEffectDuration(effect) {
+  return {
+    none: 0,
+    sparkle: 400,
+    pulse: 500,
+    shockwave: 700,
+    beams: 800,
+    stars: 900,
+    rainbow: 1000,
+    crack: 1100,
+    burst: 1400,
+  }[effect] || 0;
+}
+function familiarHoldDuration(rarity) {
+  const tier = RARITIES[rarity].tier;
+  if (tier >= 9) return 3500;
+  if (tier >= 7) return 2800;
+  if (tier >= 5) return 2200;
+  return 1500;
+}
+
+function RevealTileGrid({ sequence, currentSeqIdx, sweepMs, phase }) {
+  // Each tile gets a flip delay based on (col / WAVE_COLS) wave index + diagonal position within wave
+  // We render TILE_ROWS * TILE_COLS tiles. Each one knows the color it should currently be.
+  const tiles = [];
+  for (let r = 0; r < TILE_ROWS; r++) {
+    for (let c = 0; c < TILE_COLS; c++) {
+      tiles.push({ r, c });
+    }
+  }
+  return (
+    <div className="absolute inset-0 grid"
+      style={{
+        gridTemplateColumns: `repeat(${TILE_COLS}, 1fr)`,
+        gridTemplateRows: `repeat(${TILE_ROWS}, 1fr)`,
+      }}
+    >
+      {tiles.map(({ r, c }) => (
+        <RevealTile
+          key={`${r}-${c}`}
+          row={r}
+          col={c}
+          sequence={sequence}
+          currentSeqIdx={currentSeqIdx}
+          sweepMs={sweepMs}
+          phase={phase}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RevealTile({ row, col, sequence, currentSeqIdx, sweepMs, phase }) {
+  // A tile's "current color" is determined by: which sequence index is "currently sweeping",
+  // and whether this tile's diagonal-position has been reached by the sweep.
+  // We approximate by computing a per-tile delay (0 to sweepMs) based on diagonal distance from top-left.
+  const waveIdx = Math.floor(col / WAVE_COLS); // 0..3
+  const colInWave = col % WAVE_COLS;
+  const diagonal = row + colInWave; // 0..(TILE_ROWS - 1 + WAVE_COLS - 1)
+  const maxDiag = TILE_ROWS - 1 + WAVE_COLS - 1;
+
+  // Base delay within a single sweep: wave-block first (waveIdx * waveMs), then diagonal within
+  const totalWaves = Math.ceil(TILE_COLS / WAVE_COLS); // 4
+  const perWaveMs = sweepMs / totalWaves;
+  const waveDelay = waveIdx * perWaveMs;
+  const diagDelay = (diagonal / maxDiag) * perWaveMs * 0.9;
+  const myDelay = waveDelay + diagDelay;
+
+  // Compute current color: sequence index whose "sweep window" covers the current time relative to phase
+  // For simplicity: render the color of sequence[currentSeqIdx] if my delay < (we're past it)
+  // Otherwise render the previous color
+  const [colorIdx, setColorIdx] = useState(-1); // -1 = unflipped (dark)
+  const [flipping, setFlipping] = useState(false);
+
+  useEffect(() => {
+    if (currentSeqIdx < 0) return;
+    setFlipping(true);
+    const t = setTimeout(() => {
+      setColorIdx(currentSeqIdx);
+      setFlipping(false);
+    }, myDelay);
+    return () => clearTimeout(t);
+  }, [currentSeqIdx, myDelay]);
+
+  const color = colorIdx < 0 ? "#1a1236" : RARITIES[sequence[colorIdx]].color;
+  const glow = colorIdx < 0 ? "transparent" : RARITIES[sequence[colorIdx]].glow;
+  const isFinalColor = colorIdx === sequence.length - 1 && currentSeqIdx === sequence.length - 1;
+
+  return (
+    <div
+      className="relative"
+      style={{
+        background: color,
+        transition: `background-color 180ms ease-out`,
+        boxShadow: isFinalColor ? `inset 0 0 12px ${glow}88, 0 0 6px ${glow}66` : `inset 0 0 0 1px rgba(0,0,0,0.2)`,
+        transform: flipping ? "scale(0.95)" : "scale(1)",
+        transitionProperty: "background-color, transform, box-shadow",
+        transitionDuration: "180ms",
+      }}
+    />
+  );
+}
+
+function LockEffect({ effect, color, glow }) {
+  if (effect === "none") return null;
+  if (effect === "sparkle") {
+    return (
+      <div className="absolute inset-0 pointer-events-none">
+        {[...Array(40)].map((_, i) => (
+          <div key={i} className="absolute rounded-full"
+            style={{
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              width: `${4 + Math.random() * 6}px`,
+              height: `${4 + Math.random() * 6}px`,
+              background: glow,
+              boxShadow: `0 0 12px ${glow}`,
+              animation: `sparkle 0.8s ease-out forwards`,
+              animationDelay: `${Math.random() * 0.3}s`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (effect === "pulse") {
+    return (
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+        <div style={{
+          width: 200, height: 200, borderRadius: "50%",
+          background: `radial-gradient(circle, ${glow}88 0%, transparent 70%)`,
+          animation: `shockwave 0.8s ease-out forwards`,
+        }} />
+      </div>
+    );
+  }
+  if (effect === "shockwave") {
+    return (
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+        <div style={{
+          width: 160, height: 160, borderRadius: "50%",
+          border: `4px solid ${glow}`,
+          boxShadow: `0 0 30px ${glow}`,
+          animation: `shockwave 0.9s ease-out forwards`,
+        }} />
+      </div>
+    );
+  }
+  if (effect === "beams") {
+    return (
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+        {[...Array(8)].map((_, i) => (
+          <div key={i} className="absolute"
+            style={{
+              width: 6, height: "60vh",
+              background: `linear-gradient(to top, transparent, ${glow}, transparent)`,
+              transform: `rotate(${i * 45}deg)`,
+              transformOrigin: "center bottom",
+              animation: `light-beam 0.9s ease-out forwards`,
+              animationDelay: `${i * 0.04}s`,
+              boxShadow: `0 0 20px ${glow}`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (effect === "stars") {
+    return (
+      <div className="absolute inset-0 pointer-events-none">
+        {[...Array(6)].map((_, i) => {
+          const angle = (i / 6) * Math.PI * 2;
+          const radius = 200;
+          return (
+            <div key={i} className="absolute"
+              style={{
+                left: `calc(50% + ${Math.cos(angle) * radius}px)`,
+                top: `calc(50% + ${Math.sin(angle) * radius}px)`,
+                animation: `sparkle 1s ease-out forwards`,
+                animationDelay: `${i * 0.08}s`,
+              }}
+            >
+              <Star size={48} fill={glow} color={glow} style={{ filter: `drop-shadow(0 0 12px ${glow})` }} />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  if (effect === "rainbow") {
+    return (
+      <div className="absolute inset-0 pointer-events-none"
+        style={{
+          background: `radial-gradient(circle at center, transparent 30%, ${glow}33 60%, transparent 100%)`,
+          animation: `hue-rotate-once 1s linear forwards`,
+          mixBlendMode: "screen",
+        }}
+      />
+    );
+  }
+  if (effect === "crack") {
+    return (
+      <>
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: "#000",
+          animation: `screen-flash 0.2s ease-out forwards`,
+        }}/>
+        <div className="absolute left-0 right-0 top-1/2 pointer-events-none" style={{
+          height: 4,
+          background: `linear-gradient(90deg, transparent, #fff, ${glow}, #fff, transparent)`,
+          boxShadow: `0 0 40px #fff, 0 0 80px ${glow}`,
+          animation: `crack 1.1s ease-out forwards`,
+          transformOrigin: "center",
+        }}/>
+      </>
+    );
+  }
+  if (effect === "burst") {
+    return (
+      <>
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: "#000",
+          animation: `screen-flash 0.3s ease-out forwards`,
+        }}/>
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center"
+          style={{ animation: `screen-shake 0.6s ease-out` }}>
+          <div style={{
+            width: 200, height: 200, borderRadius: "50%",
+            background: `radial-gradient(circle, #fff 0%, ${glow} 30%, ${color} 60%, transparent 100%)`,
+            boxShadow: `0 0 100px ${glow}, 0 0 200px ${color}`,
+            animation: `burst 1.4s ease-out forwards`,
+          }}/>
+        </div>
+      </>
+    );
+  }
+  return null;
+}
+
+function FamiliarRevealLayer({ familiar, reveal }) {
+  const rarity = RARITIES[familiar.rarity];
+  const isPrimordial = reveal === "primordial";
+  const isVortex = reveal === "vortex";
+
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
+      {/* Open / vortex backdrop */}
+      {(reveal === "open" || reveal === "orbit") && (
+        <div className="absolute"
+          style={{
+            width: 360, height: 360, borderRadius: "50%",
+            background: `radial-gradient(circle, rgba(10,6,24,1) 0%, rgba(10,6,24,0.6) 60%, transparent 100%)`,
+            animation: `reveal-zoom 0.6s ease-out forwards`,
+          }}
+        />
+      )}
+      {isVortex && (
+        <div className="absolute" style={{
+          width: 400, height: 400, borderRadius: "50%",
+          background: `conic-gradient(from 0deg, transparent, ${rarity.glow}aa, transparent, ${rarity.glow}aa, transparent)`,
+          animation: `vortex-spin 1.2s ease-out forwards`,
+        }}/>
+      )}
+
+      <div className="relative animate-scale-in" style={{
+        animation: isPrimordial ? "reveal-zoom 1.2s cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards" : "reveal-zoom 0.6s ease-out forwards",
+      }}>
+        <FamiliarArt familiar={familiar} size={isPrimordial ? 240 : 180} />
+      </div>
+
+      {(reveal === "orbit" || isPrimordial) && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          {[0, 90, 180, 270].map((deg, i) => (
+            <div key={i} className="absolute" style={{
+              animation: `orbit 3s linear infinite`,
+              animationDelay: `${-i * 0.75}s`,
+            }}>
+              <Sparkles size={20} color={rarity.glow} fill={rarity.glow} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-6 text-center animate-fade-in-up" style={{ animationDelay: "0.4s" }}>
+        <div className="font-display text-2xl text-amber-100 mb-1" style={{
+          textShadow: `0 0 16px ${rarity.glow}`,
+        }}>
+          {familiar.name}
+        </div>
+        <div><RarityBadge rarity={familiar.rarity} /></div>
+        {isPrimordial && (
+          <div className="mt-3 font-display text-xs tracking-[0.4em] text-amber-300 animate-fade-in-up" style={{
+            animationDelay: "0.8s",
+          }}>
+            ✦ PRIMORDIAL ✦
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function WishingPoolScreen({ player, onBack, onWish }) {
   const [pulling, setPulling] = useState(false);
-  const [revealed, setRevealed] = useState(null);
+  const [revealing, setRevealing] = useState(null); // array of familiars during reveal
+  const [revealed, setRevealed] = useState(null);   // results grid after reveal
 
   const WISH_COST = 100;
   const TEN_WISH_COST = 900;
@@ -2190,11 +2711,17 @@ function WishingPoolScreen({ player, onBack, onWish }) {
     if (!free && player.lumens < cost) return;
     setPulling(true);
     setRevealed(null);
+    setRevealing(null);
     const results = await onWish(count, { free });
     setTimeout(() => {
-      setRevealed(results);
       setPulling(false);
-    }, 1600);
+      setRevealing(results);
+    }, 600);
+  };
+
+  const finishReveal = () => {
+    setRevealed(revealing);
+    setRevealing(null);
   };
 
   return (
@@ -2221,14 +2748,14 @@ function WishingPoolScreen({ player, onBack, onWish }) {
               variant="secondary"
               size="lg"
               onClick={() => doWish(1)}
-              disabled={pulling || player.lumens < WISH_COST}
+              disabled={pulling || revealing || player.lumens < WISH_COST}
             >
               Wish · {WISH_COST} <Coins size={14} className="inline ml-1" />
             </GoldButton>
             <GoldButton
               size="lg"
               onClick={() => doWish(10)}
-              disabled={pulling || player.lumens < TEN_WISH_COST}
+              disabled={pulling || revealing || player.lumens < TEN_WISH_COST}
             >
               10× Wish · {TEN_WISH_COST} <Coins size={14} className="inline ml-1" />
             </GoldButton>
@@ -2237,7 +2764,7 @@ function WishingPoolScreen({ player, onBack, onWish }) {
                 variant="secondary"
                 size="lg"
                 onClick={() => doWish(1, true)}
-                disabled={pulling}
+                disabled={pulling || revealing}
                 className="animate-glow-pulse"
               >
                 <Gift size={14} className="inline mr-1" /> Free Weekly Wish
@@ -2251,7 +2778,7 @@ function WishingPoolScreen({ player, onBack, onWish }) {
         </div>
       </Panel>
 
-      {pulling && (
+      {pulling && !revealing && (
         <Panel className="p-10 text-center">
           <div className="mx-auto w-24 h-24 rounded-full relative animate-pulse-glow" style={{
             background: "radial-gradient(circle, #e8c875, transparent)",
@@ -2264,6 +2791,14 @@ function WishingPoolScreen({ player, onBack, onWish }) {
           </div>
           <div className="font-display text-amber-200 mt-4 tracking-widest">WEAVING FATE…</div>
         </Panel>
+      )}
+
+      {revealing && (
+        <WishReveal
+          familiars={revealing}
+          onComplete={finishReveal}
+          onSkipAll={finishReveal}
+        />
       )}
 
       {revealed && !pulling && (
